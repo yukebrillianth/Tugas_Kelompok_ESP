@@ -298,6 +298,8 @@ static void prov_cb(esp_ble_mesh_prov_cb_event_t event, esp_ble_mesh_prov_cb_par
             (role != MESH_ROLE_PUMP && role != MESH_ROLE_SENSOR && role != MESH_ROLE_RELAY)) {
             break;
         }
+        ESP_LOGI(TAG, "Perangkat terdeteksi, peran 0x%02x, alamat %02x:%02x:%02x:%02x:%02x:%02x", role,
+                 uuid[2], uuid[3], uuid[4], uuid[5], uuid[6], uuid[7]);
 
         esp_ble_mesh_unprov_dev_add_t add = {0};
         memcpy(add.addr, param->provisioner_recv_unprov_adv_pkt.addr, BD_ADDR_LEN);

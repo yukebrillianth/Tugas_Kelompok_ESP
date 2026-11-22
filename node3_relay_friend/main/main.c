@@ -9,6 +9,7 @@
 
 #include "mesh_bt.h"
 #include "mesh_config.h"
+#include "rgb_led.h"
 
 #define TAG "RELAY"
 
@@ -19,6 +20,7 @@ static void prov_cb(esp_ble_mesh_prov_cb_event_t event, esp_ble_mesh_prov_cb_par
     switch (event) {
     case ESP_BLE_MESH_NODE_PROV_COMPLETE_EVT:
         ESP_LOGI(TAG, "Provisioning selesai, alamat 0x%04x", param->node_prov_complete.addr);
+        rgb_led_set(0, 32, 0);
         break;
     case ESP_BLE_MESH_FRIEND_FRIENDSHIP_ESTABLISH_EVT:
         ESP_LOGI(TAG, "Friendship dengan LPN 0x%04x terbentuk", param->frnd_friendship_establish.lpn_addr);
@@ -68,6 +70,7 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(err);
 
+    ESP_ERROR_CHECK(rgb_led_init());
     ESP_ERROR_CHECK(mesh_bt_init());
     mesh_make_uuid(dev_uuid, MESH_ROLE_RELAY);
 
@@ -76,6 +79,8 @@ void app_main(void)
 
     if (!esp_ble_mesh_node_is_provisioned()) {
         ESP_ERROR_CHECK(esp_ble_mesh_node_prov_enable(ESP_BLE_MESH_PROV_ADV | ESP_BLE_MESH_PROV_GATT));
+    } else {
+        rgb_led_set(0, 32, 0);
     }
 
     ESP_LOGI(TAG, "Relay dan Friend aktif, selalu menyala");
