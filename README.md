@@ -66,9 +66,15 @@ idf.py menuconfig
 idf.py build flash monitor -p /dev/cu.usbmodemXXXX
 ```
 
+Atau pakai script, yang sudah mengatur target chip tiap node:
+
+```bash
+scripts/flash.sh node2 /dev/cu.usbmodemXXXX --monitor
+```
+
 - Node 1 memakai `esp32c3`. Kalau flash gagal, tahan tombol BOOT, tekan RESET, lalu lepas BOOT.
-- Ganti `/dev/cu.usbmodemXXXX` dengan port yang muncul di `ls /dev/cu.*`.
-- Node 4 perlu SSID, password Wi-Fi, dan alamat broker (misal `mqtt://192.168.1.10:1883`) di menuconfig.
+- Ganti `/dev/cu.usbmodemXXXX` dengan port yang muncul di `ls /dev/cu.*`. Tanpa port, script memakai port pertama yang ditemukan.
+- Node 4 perlu SSID dan password Wi-Fi di menuconfig. Saat ini Node 4 memakai Wi-Fi `ITS_hifi_indosat` dan broker `mqtt://192.168.8.15:1883`. Angka terakhir itu IP laptop yang menjalankan Mosquitto. Kalau IP laptop berubah, ubah juga di menuconfig.
 
 Pengaturan di menuconfig tersimpan di `sdkconfig`, yang tidak ikut di-commit.
 
