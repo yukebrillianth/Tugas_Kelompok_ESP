@@ -15,6 +15,7 @@
 #include "mesh_bt.h"
 #include "mesh_config.h"
 #include "mesh_payload.h"
+#include "rgb_led.h"
 
 #define TAG "SENSOR"
 
@@ -35,14 +36,17 @@ static void prov_cb(esp_ble_mesh_prov_cb_event_t event, esp_ble_mesh_prov_cb_par
     case ESP_BLE_MESH_NODE_PROV_COMPLETE_EVT:
         ESP_LOGI(TAG, "Provisioning selesai, alamat 0x%04x", param->node_prov_complete.addr);
         lpn_start();
+        rgb_led_set(0, 0, 32);
         break;
     case ESP_BLE_MESH_LPN_FRIENDSHIP_ESTABLISH_EVT:
         friendship = true;
         ESP_LOGI(TAG, "Friendship terbentuk, friend 0x%04x", param->lpn_friendship_establish.friend_addr);
+        rgb_led_set(0, 32, 0);
         break;
     case ESP_BLE_MESH_LPN_FRIENDSHIP_TERMINATE_EVT:
         friendship = false;
         ESP_LOGW(TAG, "Friendship putus");
+        rgb_led_set(0, 0, 32);
         break;
     default:
         break;
@@ -61,6 +65,7 @@ static esp_ble_mesh_cfg_srv_t cfg_srv = {
 
 ESP_BLE_MESH_MODEL_PUB_DEFINE(vnd_pub, SENSOR_PAYLOAD_LEN + 3, ROLE_NODE);
 static esp_ble_mesh_model_op_t vnd_op[] = {
+    ESP_BLE_MESH_MODEL_OP(MESH_VND_OP_DATA, SENSOR_PAYLOAD_LEN),
     ESP_BLE_MESH_MODEL_OP_END,
 };
 
@@ -98,6 +103,7 @@ static void sensor_task(void *arg)
         vTaskDelay(pdMS_TO_TICKS(CONFIG_SENSOR_PERIOD_S * 1000));
 
         if (!esp_ble_mesh_node_is_provisioned()) {
+            ESP_LOGI(TAG, "Belum provisioned, menunggu node 4");
             continue;
         }
         if (!dht11_read((gpio_num_t)CONFIG_DHT11_GPIO, &r)) {
@@ -127,16 +133,24 @@ void app_main(void)
     ESP_ERROR_CHECK(err);
 
     ESP_ERROR_CHECK(gpio_pullup_en((gpio_num_t)CONFIG_DHT11_GPIO));
+    ESP_ERROR_CHECK(rgb_led_init());
     ESP_ERROR_CHECK(mesh_bt_init());
+    ESP_LOGI(TAG, "Bluetooth siap");
     mesh_make_uuid(dev_uuid, MESH_ROLE_SENSOR);
 
     ESP_ERROR_CHECK(esp_ble_mesh_register_prov_callback(prov_cb));
     ESP_ERROR_CHECK(esp_ble_mesh_init(&provision, &composition));
+    ESP_LOGI(TAG, "Mesh siap");
 
-    if (esp_ble_mesh_node_is_provisioned()) {
+    bool provisioned = esp_ble_mesh_node_is_provisioned();
+    ESP_LOGI(TAG, "Boot, sudah provisioned: %s", provisioned ? "ya" : "belum");
+    if (provisioned) {
         lpn_start();
+        rgb_led_set(0, 0, 32);
     } else {
-        ESP_ERROR_CHECK(esp_ble_mesh_node_prov_enable(ESP_BLE_MESH_PROV_ADV | ESP_BLE_MESH_PROV_GATT));
+        err = esp_ble_mesh_node_prov_enable(ESP_BLE_MESH_PROV_ADV | ESP_BLE_MESH_PROV_GATT);
+        ESP_LOGI(TAG, "Prov enable: %s", esp_err_to_name(err));
+        ESP_ERROR_CHECK(err);
     }
 
     xTaskCreate(sensor_task, "sensor", 4096, NULL, 5, NULL);
