@@ -65,6 +65,7 @@ static esp_ble_mesh_cfg_srv_t cfg_srv = {
 
 ESP_BLE_MESH_MODEL_PUB_DEFINE(vnd_pub, SENSOR_PAYLOAD_LEN + 3, ROLE_NODE);
 static esp_ble_mesh_model_op_t vnd_op[] = {
+    ESP_BLE_MESH_MODEL_OP(MESH_VND_OP_DATA, SENSOR_PAYLOAD_LEN),
     ESP_BLE_MESH_MODEL_OP_END,
 };
 
