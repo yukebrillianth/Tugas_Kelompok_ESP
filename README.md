@@ -118,4 +118,28 @@ Tes ini memeriksa validasi payload dan logika histeresis pompa.
 
 ## Kerja kelompok
 
-Satu repo untuk semua. Kerjakan tiap node di branch sendiri, lalu buka PR ke `main` untuk di-review anggota lain sebelum merge.
+Repo ini private. Tugas dibagi lewat tab Issues. Cara ngerjain:
+
+1. Clone repo, lalu atur identitas git pakai akun sendiri:
+
+   ```bash
+   git clone https://github.com/yukebrillianth/Tugas_Kelompok_ESP.git
+   git config user.name "Nama kamu"
+   git config user.email "email-kamu@example.com"
+   ```
+
+2. Buat branch per tugas, misalnya `node2-uji-dht11`:
+
+   ```bash
+   git checkout -b node2-uji-dht11
+   ```
+
+3. Commit perubahan dengan pesan yang jelas, lalu push:
+
+   ```bash
+   git push -u origin node2-uji-dht11
+   ```
+
+4. Buka PR ke `main`. Minta satu anggota lain me-review sebelum merge.
+
+Jangan commit kredensial Wi-Fi. Build dengan ESP-IDF v5.5.x supaya hasilnya sama dengan anggota lain.
