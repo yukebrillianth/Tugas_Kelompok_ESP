@@ -1,59 +1,61 @@
 # Pompa Otomatis Berbasis BLE Mesh dan MQTT
 
-Sensor DHT11 membaca suhu dan kelembapan, lalu data dikirim lewat BLE Mesh ke gateway. Gateway menyalakan pompa saat suhu mencapai ambang dan mengirim telemetri ke MQTT. Dashboard menampilkan grafik dan status pompa secara real-time.
+Tugas kelompok mata kuliah **Desain dan Aplikasi Internet of Things**.
 
-## Arsitektur
+| | |
+|---|---|
+| Dosen | Dr. Muhtadin, S.T., M.T. |
+| Program studi | Teknik Komputer |
 
-| Folder | Peran | Board |
-|---|---|---|
-| `node1_pump_server` | Pompa DC, Generic OnOff Server | ESP32-C3 Super Mini |
-| `node2_sensor_lpn` | Sensor DHT11, Low Power Node | ESP32-S3 N16R8 |
-| `node3_relay_friend` | Relay dan Friend | ESP32-S3 N16R8 |
-| `node4_gateway_prov` | Provisioner, Proxy, gateway Wi-Fi ke MQTT | ESP32-S3 N16R8 |
-| `computer_dashboard` | Mosquitto dan dashboard web | Komputer |
-| `common` | Konstanta dan format payload, dipakai semua node lewat `EXTRA_COMPONENT_DIRS` | |
+| NIM | Nama |
+|---|---|
+| 5024241016 | Yuke Brilliant Hestiavin |
+| 5024241018 | Naufal Ahimsa Raushanfekr |
+| 5024241072 | Rozaq Nafi'ul Hafidz |
 
-Node 1 dan Node 3 harus selalu menyala. Node 3 menjadi penghubung antara Node 1, Node 2, dan Node 4.
+## Tentang
 
-## Pin dan wiring
+Sensor DHT11 membaca suhu dan kelembapan. Data dikirim lewat BLE Mesh ke gateway. Saat suhu mencapai ambang, gateway menyalakan pompa dan mengirim data ke dashboard lewat MQTT.
 
-| Node | Board | Pin | Fungsi | Setting |
+**Status:** keempat node sudah lolos build dengan ESP-IDF v5.5.3. Pengujian di hardware masih berjalan, lihat tab Issues.
+
+## Komponen
+
+| Node | Folder | Fungsi | Board | Pin |
 |---|---|---|---|---|
-| 1 | ESP32-C3 Super Mini | GPIO 5 | IN modul relay | `PUMP_GPIO` |
-| 2 | ESP32-S3 N16R8 | GPIO 4 | DATA DHT11 | `DHT11_GPIO` |
-| 3 | ESP32-S3 N16R8 | - | Tidak ada, cukup 5V | |
-| 4 | ESP32-S3 N16R8 | - | Tidak ada, cukup 5V | |
+| 1 | `node1_pump_server` | Pompa lewat relay | ESP32-C3 Super Mini | GPIO 5 |
+| 2 | `node2_sensor_lpn` | Sensor DHT11 (LPN) | ESP32-S3 N16R8 | GPIO 4 |
+| 3 | `node3_relay_friend` | Relay dan friend | ESP32-S3 N16R8 | - |
+| 4 | `node4_gateway_prov` | Provisioner dan gateway MQTT | ESP32-S3 N16R8 | - |
+| - | `computer_dashboard` | Mosquitto dan dashboard | Komputer | Port 1883, 9001 |
 
-Pin bisa diubah lewat `menuconfig`. GPIO 5 dipakai karena ESP32-C3 hanya punya GPIO 0 sampai 21, jadi GPIO 26 dari brief tidak tersedia.
+Folder `common/` berisi konstanta dan format data yang dipakai semua node.
 
-**Node 1, pompa (modul relay 5V):**
+## Rangkaian
 
-1. VCC relay ke 5V ESP32, GND relay ke GND ESP32, IN relay ke GPIO 5.
-2. Adaptor 12 V (+) ke COM relay. NO relay ke (+) pompa. (-) pompa ke (-) adaptor 12 V.
-3. GND adaptor 12 V disambung ke GND ESP32 supaya referensi ground sama.
+**Pompa (Node 1)**
 
-Banyak modul relay aktif LOW. Jika pompa menyala saat boot atau tidak pernah menyala, buka `menuconfig` > Pompa, lalu matikan "Relay aktif HIGH".
+- IN relay ke GPIO 5, VCC ke 5V, GND ke GND.
+- Adaptor 12 V (+) ke COM relay. NO relay ke (+) pompa. (-) pompa ke (-) adaptor.
+- GND adaptor disambung ke GND ESP32.
+- Kalau relay aktif LOW, matikan "Relay aktif HIGH" di menuconfig.
 
-Alternatif MOSFET logic-level (low side): (+) pompa ke 12 V, (-) pompa ke drain, source ke GND, gate ke GPIO 5 lewat resistor 220 Ω. Pasang dioda 1N4007 paralel pompa dengan katoda ke +12 V.
-
-**Node 2, sensor DHT11:**
+**Sensor (Node 2)**
 
 - VCC ke 3V3, DATA ke GPIO 4, GND ke GND.
-- Modul DHT11 yang berbentuk board biasanya sudah punya pull-up. Sensor polos (kaki terbuka) butuh resistor 4.7k sampai 10k antara DATA dan VCC.
+- Modul DHT11 yang berbentuk papan biasanya sudah punya pull-up. Sensor dengan kaki terbuka perlu resistor 4.7k antara DATA dan VCC.
 
-**Node 3 dan Node 4:** tidak ada sensor atau aktuator, cukup 5V dari USB. Node 3 diletakkan di tengah, di antara Node 1, Node 2, dan Node 4 sesuai gambar arsitektur, supaya sinyal BLE mesh sampai ke semua node.
+**Node 3 dan Node 4** cukup pakai USB 5V. Node 3 sebaiknya diletakkan di tengah, di antara Node 1, Node 2, dan Node 4.
 
-**Pin yang sebaiknya tidak dipakai:**
+Pin yang sebaiknya dihindari:
+- C3 Super Mini: GPIO 2, 8, 9, 18, 19.
+- S3 N16R8: GPIO 0, 3, 19, 20, 45, 46, dan GPIO 26 sampai 37 yang dipakai flash dan PSRAM.
 
-- ESP32-C3 Super Mini: GPIO 2, 8, 9 (strapping; GPIO 9 biasanya tombol BOOT), dan GPIO 18, 19 (USB).
-- ESP32-S3 N16R8: GPIO 0, 3, 45, 46 (strapping), GPIO 19, 20 (USB), dan GPIO 26 sampai 37 (dipakai flash dan PSRAM di dalam modul).
+## Cara menjalankan
 
-## Prasyarat
+**Yang perlu disiapkan:** ESP-IDF v5.5.x dan Docker Desktop.
 
-- ESP-IDF v5.5.x. Di tiap terminal, jalankan `. <lokasi-esp-idf>/export.sh` sebelum `idf.py`.
-- Docker Desktop untuk Mosquitto.
-
-## Build dan flash
+### Build dan flash
 
 Setiap node adalah project ESP-IDF sendiri. Contoh untuk Node 2:
 
@@ -64,24 +66,26 @@ idf.py menuconfig
 idf.py build flash monitor -p /dev/cu.usbmodemXXXX
 ```
 
-Node 1 memakai `esp32c3`. Jika flash gagal di C3 Super Mini, tahan tombol BOOT, tekan RESET, lalu lepas BOOT. Ganti `/dev/cu.usbmodemXXXX` dengan port yang muncul di `ls /dev/cu.*`.
+- Node 1 memakai `esp32c3`. Kalau flash gagal, tahan tombol BOOT, tekan RESET, lalu lepas BOOT.
+- Ganti `/dev/cu.usbmodemXXXX` dengan port yang muncul di `ls /dev/cu.*`.
+- Node 4 perlu SSID, password Wi-Fi, dan alamat broker (misal `mqtt://192.168.1.10:1883`) di menuconfig.
 
-Node 4 memerlukan SSID, password Wi-Fi, dan `GW_MQTT_URI` (IP komputer, misal `mqtt://192.168.1.10:1883`) di `menuconfig`. Nilai ini disimpan di `sdkconfig`, yang sudah masuk `.gitignore`.
+Pengaturan di menuconfig tersimpan di `sdkconfig`, yang tidak ikut di-commit.
 
-## Dashboard
+### Dashboard
 
 ```bash
 cd computer_dashboard
 docker compose up -d
 ```
 
-Buka `computer_dashboard/index.html` di browser. Dashboard terhubung ke `ws://localhost:9001`. Pastikan firewall komputer mengizinkan port 1883 dan 9001 dari jaringan Wi-Fi yang sama dengan ESP32.
+Buka `computer_dashboard/index.html` di browser. Dashboard terhubung ke `ws://localhost:9001`.
 
-## Urutan demo
+### Urutan demo
 
-1. Jalankan Mosquitto dan buka dashboard.
+1. Nyalakan Mosquitto, lalu buka dashboard.
 2. Nyalakan Node 1 dan Node 3.
-3. Nyalakan Node 4. Dalam beberapa detik Node 4 men-provision dan mengonfigurasi Node 1 dan Node 3.
+3. Nyalakan Node 4. Node 4 otomatis men-provision dan mengonfigurasi Node 1 dan Node 3.
 4. Nyalakan Node 2 terakhir, supaya friendship dengan Node 3 terbentuk setelah provisioning.
 
 ## Topik MQTT
@@ -91,13 +95,18 @@ Buka `computer_dashboard/index.html` di browser. Dashboard terhubung ke `ws://lo
 | `iot/mesh/telemetry` | Node 4 ke dashboard | `{"temp": 31.0, "hum": 68.0, "pump": 1, "rssi": -62, "uptime": 120}` |
 | `iot/mesh/cmd` | Dashboard ke Node 4 | `{"pump": 1}`, `{"pump": 0}`, `{"mode": "auto"}` |
 
-`rssi` adalah kekuatan sinyal Wi-Fi gateway (Node 4), bukan BLE.
+`rssi` adalah sinyal Wi-Fi gateway, bukan BLE.
 
-## Kontrol pompa
+## Ambang pompa
 
-- Mode auto: pompa ON saat suhu >= `PUMP_ON_TEMP`, OFF saat suhu < `PUMP_OFF_TEMP`. Default keduanya 31 sesuai brief.
-- Histeresis: isi `PUMP_OFF_TEMP` dengan nilai lebih kecil, misal 30, supaya pompa tidak bolak-balik di sekitar 31 °C.
-- Manual: `{"pump": 1}` atau `{"pump": 0}` mematikan mode auto sampai `{"mode": "auto"}` dikirim.
+- Default: pompa ON saat suhu 31 °C atau lebih, dan OFF saat di bawah 31 °C.
+- Untuk histeresis, isi `PUMP_OFF_TEMP` di menuconfig Node 4 dengan 30. Pompa tidak akan bolak-balik di sekitar 31 °C.
+- Perintah manual dari dashboard mematikan mode auto sampai `{"mode": "auto"}` dikirim.
+
+## Catatan
+
+- Node 2 tidak memakai deep sleep, karena deep sleep akan memutus friendship dengan Node 3.
+- Node 3 hanya meneruskan paket. Node 3 tidak punya AppKey, jadi tidak bisa membaca isi perintah.
 
 ## Tes tanpa hardware
 
@@ -107,39 +116,13 @@ Dari root repo:
 gcc -Wall -Icommon/include -Inode4_gateway_prov/main test/test_host.c -o test/test_host && ./test/test_host
 ```
 
-Tes ini memeriksa validasi payload dan logika histeresis pompa.
-
-## Catatan teknis
-
-- LPN tidak memakai deep sleep, karena deep sleep memutus friendship dengan Node 3. Radio hanya aktif saat poll, dan sensor dibaca setiap `SENSOR_PERIOD_S` detik.
-- DHT11 hanya memberi bilangan bulat (suhu 1 °C, kelembapan 1 %), jadi payload cukup 2 byte.
-- Node 3 tidak punya model aplikasi, jadi tidak ada AppKey yang di-bind. Node 3 hanya di-provision dan berperan sebagai relay dan friend.
-- Node 4 menyimpan daftar node dan AppKey di NVS. Setelah reboot, node tidak perlu di-provision ulang.
-
 ## Kerja kelompok
 
-Repo ini private. Tugas dibagi lewat tab Issues. Cara ngerjain:
+Tugas dibagi lewat tab Issues. Langkahnya:
 
-1. Clone repo, lalu atur identitas git pakai akun sendiri:
+1. Clone repo, lalu atur nama dan email git pakai akun sendiri.
+2. Buat branch per tugas, misalnya `node2-uji-dht11`.
+3. Commit dengan akun sendiri, push, lalu buka PR ke `main`.
+4. Minta satu anggota lain me-review sebelum merge.
 
-   ```bash
-   git clone https://github.com/yukebrillianth/Tugas_Kelompok_ESP.git
-   git config user.name "Nama kamu"
-   git config user.email "email-kamu@example.com"
-   ```
-
-2. Buat branch per tugas, misalnya `node2-uji-dht11`:
-
-   ```bash
-   git checkout -b node2-uji-dht11
-   ```
-
-3. Commit perubahan dengan pesan yang jelas, lalu push:
-
-   ```bash
-   git push -u origin node2-uji-dht11
-   ```
-
-4. Buka PR ke `main`. Minta satu anggota lain me-review sebelum merge.
-
-Jangan commit kredensial Wi-Fi. Build dengan ESP-IDF v5.5.x supaya hasilnya sama dengan anggota lain.
+Jangan commit password Wi-Fi.
