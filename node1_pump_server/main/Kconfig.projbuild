@@ -1,0 +1,17 @@
+menu "Pompa"
+
+    config PUMP_GPIO
+        int "GPIO relay pompa"
+        range 0 21
+        default 5
+        help
+            ESP32-C3 hanya punya GPIO 0-21. Hindari GPIO 2, 8, 9 (strapping)
+            dan 18, 19 (USB).
+
+    config PUMP_ACTIVE_HIGH
+        bool "Relay aktif HIGH"
+        default y
+        help
+            Matikan jika modul relay aktif LOW.
+
+endmenu

@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Monitor Pompa</title>
+<style>
+  :root {
+    --bg: #f4f6f8; --card: #ffffff; --text: #1d2733; --muted: #6b7785;
+    --line: #e2e7ed; --on: #1f9d55; --off: #c0392b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #111820; --card: #1a2430; --text: #e6edf3; --muted: #8b98a5; --line: #2a3644; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); }
+  main { max-width: 1000px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+  header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+  h1 { font-size: 20px; margin: 0; }
+  .status { font-size: 14px; color: var(--muted); }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
+  .card, .panel { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
+  .label { font-size: 13px; color: var(--muted); }
+  .value { font-size: 28px; font-weight: 600; margin-top: 4px; }
+  .pump-on { color: var(--on); }
+  .pump-off { color: var(--off); }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; }
+  button {
+    font: inherit; padding: 8px 14px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--bg); color: var(--text);
+  }
+  button:hover { border-color: var(--muted); }
+  canvas { width: 100% !important; height: 300px !important; }
+  .log { max-height: 320px; overflow: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  td.payload { font-family: ui-monospace, monospace; word-break: break-all; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Monitor Pompa Otomatis</h1>
+    <div class="status" id="conn">Menghubungkan...</div>
+  </header>
+
+  <section class="cards">
+    <div class="card"><div class="label">Suhu</div><div class="value" id="temp">--</div></div>
+    <div class="card"><div class="label">Kelembapan</div><div class="value" id="hum">--</div></div>
+    <div class="card"><div class="label">Pompa</div><div class="value" id="pump">--</div></div>
+    <div class="card"><div class="label">Sinyal Wi-Fi gateway</div><div class="value" id="rssi">--</div></div>
+  </section>
+
+  <section class="panel"><canvas id="chart"></canvas></section>
+
+  <section class="panel">
+    <div class="controls">
+      <button data-cmd='{"pump": 1}'>Pompa ON</button>
+      <button data-cmd='{"pump": 0}'>Pompa OFF</button>
+      <button data-cmd='{"mode": "auto"}'>Mode auto</button>
+    </div>
+  </section>
+
+  <section class="panel log">
+    <table>
+      <thead><tr><th>Waktu</th><th>Topik</th><th>Isi paket</th></tr></thead>
+      <tbody id="log"></tbody>
+    </table>
+  </section>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.js"></script>
+<script src="https://unpkg.com/mqtt@5.10.3/dist/mqtt.min.js"></script>
+<script>
+  const BROKER = "ws://localhost:9001";
+  const TOPIC_TELEMETRY = "iot/mesh/telemetry";
+  const TOPIC_CMD = "iot/mesh/cmd";
+  const MAX_POINTS = 60;
+  const MAX_LOG = 200;
+
+  const $ = (id) => document.getElementById(id);
+  const labels = [];
+  const temps = [];
+  const hums = [];
+
+  const chart = new Chart($("chart"), {
+    type: "line",
+    data: {
+      labels,
+      datasets: [
+        { label: "Suhu (°C)", data: temps, borderColor: "#e4572e", tension: 0.3, pointRadius: 0 },
+        { label: "Kelembapan (%)", data: hums, borderColor: "#17a2b8", tension: 0.3, pointRadius: 0 },
+      ],
+    },
+    options: { animation: false, scales: { x: { ticks: { maxTicksLimit: 8 } } } },
+  });
+
+  const client = mqtt.connect(BROKER, { reconnectPeriod: 2000 });
+
+  client.on("connect", () => {
+    $("conn").textContent = "Terhubung ke " + BROKER;
+    client.subscribe(TOPIC_TELEMETRY);
+  });
+  client.on("reconnect", () => { $("conn").textContent = "Menyambung ulang..."; });
+  client.on("close", () => { $("conn").textContent = "Terputus"; });
+  client.on("error", (err) => { $("conn").textContent = "Error: " + err.message; });
+
+  client.on("message", (topic, payload) => {
+    const text = payload.toString();
+    addLog(topic, text);
+    if (topic !== TOPIC_TELEMETRY) return;
+    try {
+      update(JSON.parse(text));
+    } catch (err) {
+      console.warn("Paket bukan JSON valid", err);
+    }
+  });
+
+  document.querySelectorAll("button[data-cmd]").forEach((btn) => {
+    btn.addEventListener("click", () => client.publish(TOPIC_CMD, btn.dataset.cmd));
+  });
+
+  function update(d) {
+    labels.push(new Date().toLocaleTimeString());
+    temps.push(d.temp);
+    hums.push(d.hum);
+    if (labels.length > MAX_POINTS) {
+      labels.shift();
+      temps.shift();
+      hums.shift();
+    }
+    chart.update();
+
+    $("temp").textContent = d.temp.toFixed(1) + " °C";
+    $("hum").textContent = d.hum.toFixed(1) + " %";
+    $("rssi").textContent = d.rssi + " dBm";
+    const on = d.pump === 1;
+    $("pump").textContent = on ? "ON" : "OFF";
+    $("pump").className = "value " + (on ? "pump-on" : "pump-off");
+  }
+
+  function addLog(topic, text) {
+    const row = document.createElement("tr");
+    [new Date().toLocaleTimeString(), topic, text].forEach((value, i) => {
+      const td = document.createElement("td");
+      td.textContent = value;
+      if (i === 2) td.className = "payload";
+      row.appendChild(td);
+    });
+    const body = $("log");
+    body.prepend(row);
+    while (body.children.length > MAX_LOG) {
+      body.lastElementChild.remove();
+    }
+  }
+</script>
+</body>
+</html>

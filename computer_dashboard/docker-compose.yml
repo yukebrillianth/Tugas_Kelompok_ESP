@@ -1,0 +1,10 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: iot-mosquitto
+    ports:
+      - "1883:1883"   # MQTT untuk ESP32 (Node 4)
+      - "9001:9001"   # MQTT over WebSocket untuk dashboard
+    volumes:
+      - ./mosquitto/config/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    restart: unless-stopped

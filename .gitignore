@@ -1,0 +1,14 @@
+# Output build ESP-IDF dan konfigurasi lokal (jangan di-commit)
+build/
+sdkconfig
+sdkconfig.old
+sdkconfig.defaults.local
+managed_components/
+
+# Hasil tes host
+test/test_host
+
+.DS_Store
+
+# Pengaturan IDE lokal (berisi path mesin)
+.vscode/
