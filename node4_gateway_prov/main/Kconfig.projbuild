@@ -20,13 +20,13 @@ menu "Kontrol pompa"
 
     config PUMP_ON_TEMP
         int "Suhu pompa ON (C)"
-        default 31
+        default 29
         help
             Pompa ON saat suhu >= nilai ini.
 
     config PUMP_OFF_TEMP
         int "Suhu pompa OFF (C)"
-        default 31
+        default 29
         help
             Pompa OFF saat suhu < nilai ini. Sama dengan suhu ON sesuai brief.
             Isi lebih kecil (misal 30) untuk histeresis.
