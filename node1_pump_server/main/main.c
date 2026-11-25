@@ -16,9 +16,17 @@
 
 static uint8_t dev_uuid[16];
 
+#ifdef CONFIG_PUMP_ACTIVE_HIGH
+#define PUMP_ON_LEVEL  1
+#define PUMP_OFF_LEVEL 0
+#else
+#define PUMP_ON_LEVEL  0
+#define PUMP_OFF_LEVEL 1
+#endif
+
 static void pump_set(bool on)
 {
-    gpio_set_level(CONFIG_PUMP_GPIO, on ? CONFIG_PUMP_ACTIVE_HIGH : !CONFIG_PUMP_ACTIVE_HIGH);
+    gpio_set_level(CONFIG_PUMP_GPIO, on ? PUMP_ON_LEVEL : PUMP_OFF_LEVEL);
 }
 
 static void prov_cb(esp_ble_mesh_prov_cb_event_t event, esp_ble_mesh_prov_cb_param_t *param)
@@ -28,7 +36,8 @@ static void prov_cb(esp_ble_mesh_prov_cb_event_t event, esp_ble_mesh_prov_cb_par
         ESP_LOGI(TAG, "Provisioning selesai, alamat 0x%04x", param->node_prov_complete.addr);
         break;
     case ESP_BLE_MESH_NODE_PROV_RESET_EVT:
-        ESP_LOGI(TAG, "Node di-reset");
+        pump_set(false);
+        ESP_LOGI(TAG, "Node di-reset, pompa dimatikan");
         break;
     default:
         break;
@@ -41,9 +50,13 @@ static void generic_server_cb(esp_ble_mesh_generic_server_cb_event_t event,
     if (event != ESP_BLE_MESH_GENERIC_SERVER_STATE_CHANGE_EVT) {
         return;
     }
-    bool on = param->value.state_change.onoff_set.onoff;
-    pump_set(on);
-    ESP_LOGI(TAG, "PUMP %s (perintah dari 0x%04x)", on ? "ON" : "OFF", param->ctx.addr);
+    if (param->ctx.recv_op == ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET ||
+        param->ctx.recv_op == ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET_UNACK) {
+        bool on = param->value.state_change.onoff_set.onoff;
+        pump_set(on);
+        ESP_LOGI(TAG, "PUMP %s (perintah dari 0x%04x, RSSI %d dBm)",
+                 on ? "ON" : "OFF", param->ctx.addr, param->ctx.recv_rssi);
+    }
 }
 
 static esp_ble_mesh_cfg_srv_t cfg_srv = {
@@ -107,6 +120,6 @@ void app_main(void)
         ESP_ERROR_CHECK(esp_ble_mesh_node_prov_enable(ESP_BLE_MESH_PROV_ADV | ESP_BLE_MESH_PROV_GATT));
     }
 
-    ESP_LOGI(TAG, "Siaga. GPIO %d, relay aktif %s", CONFIG_PUMP_GPIO,
-             CONFIG_PUMP_ACTIVE_HIGH ? "HIGH" : "LOW");
+    ESP_LOGI(TAG, "Siaga (TX +20 dBm). GPIO %d, driver aktif %s", CONFIG_PUMP_GPIO,
+             PUMP_ON_LEVEL ? "HIGH" : "LOW");
 }

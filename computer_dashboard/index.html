@@ -6,66 +6,203 @@
 <title>Monitor Pompa</title>
 <style>
   :root {
-    --bg: #f4f6f8; --card: #ffffff; --text: #1d2733; --muted: #6b7785;
-    --line: #e2e7ed; --on: #1f9d55; --off: #c0392b;
+    --bg: #f3f5f7; --surface: #ffffff; --surface-alt: #f8fafc; --text: #111827;
+    --muted: #64748b; --line: #dbe2ea; --ok: #15803d; --ok-bg: #dcfce7;
+    --err: #b91c1c; --err-bg: #fee2e2; --warn: #b45309; --warn-bg: #fef3c7;
+    --accent: #0f4c81; --accent-bg: #e0eef9;
   }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #111820; --card: #1a2430; --text: #e6edf3; --muted: #8b98a5; --line: #2a3644; }
+    :root {
+      --bg: #0d1117; --surface: #161b22; --surface-alt: #1c232d; --text: #e6edf3;
+      --muted: #8b949e; --line: #2d3540; --ok: #3fb950; --ok-bg: #132d1c;
+      --err: #f85149; --err-bg: #36181a; --warn: #d29922; --warn-bg: #33270d;
+      --accent: #58a6ff; --accent-bg: #142840;
+    }
   }
   * { box-sizing: border-box; }
-  body { margin: 0; font-family: system-ui, sans-serif; background: var(--bg); color: var(--text); }
-  main { max-width: 1000px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
-  header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
-  h1 { font-size: 20px; margin: 0; }
-  .status { font-size: 14px; color: var(--muted); }
-  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; }
-  .card, .panel { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px; }
-  .label { font-size: 13px; color: var(--muted); }
-  .value { font-size: 28px; font-weight: 600; margin-top: 4px; }
-  .pump-on { color: var(--on); }
-  .pump-off { color: var(--off); }
+  body { margin: 0; font-family: system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.45; }
+  main { max-width: 1120px; margin: 0 auto; padding: 16px; display: grid; gap: 14px; }
+  header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+  .title-wrap { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+  h1 { font-size: 18px; font-weight: 600; margin: 0; }
+  .subtitle { font-size: 12px; color: var(--muted); font-family: ui-monospace, monospace; }
+  .header-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .badge { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 4px; font-size: 12px; font-weight: 500; border: 1px solid var(--line); background: var(--surface); color: var(--muted); font-family: ui-monospace, monospace; }
+  .badge.ok { color: var(--ok); background: var(--ok-bg); border-color: transparent; }
+  .badge.err { color: var(--err); background: var(--err-bg); border-color: transparent; }
+  .badge.warn { color: var(--warn); background: var(--warn-bg); border-color: transparent; }
+  .badge.accent { color: var(--accent); background: var(--accent-bg); border-color: transparent; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+  .card, .panel { background: var(--surface); border: 1px solid var(--line); border-radius: 6px; padding: 14px; }
+  .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); font-weight: 600; }
+  .value { font-size: 26px; font-weight: 600; margin-top: 4px; font-variant-numeric: tabular-nums; font-family: ui-monospace, monospace; }
+  .sub { margin-top: 4px; font-size: 12px; color: var(--muted); font-family: ui-monospace, monospace; }
+  .pump-on { color: var(--ok); }
+  .pump-off { color: var(--err); }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  @media (max-width: 760px) { .grid-2 { grid-template-columns: 1fr; } }
+  .panel-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+  .panel-title { font-size: 13px; font-weight: 600; margin: 0; }
   .controls { display: flex; flex-wrap: wrap; gap: 8px; }
-  button {
-    font: inherit; padding: 8px 14px; border-radius: 8px; cursor: pointer;
-    border: 1px solid var(--line); background: var(--bg); color: var(--text);
-  }
+  button { font: inherit; font-size: 13px; font-weight: 500; padding: 7px 13px; border-radius: 5px; cursor: pointer; border: 1px solid var(--line); background: var(--surface-alt); color: var(--text); }
   button:hover { border-color: var(--muted); }
-  canvas { width: 100% !important; height: 300px !important; }
-  .log { max-height: 320px; overflow: auto; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  button.primary { background: var(--accent); color: #ffffff; border-color: var(--accent); }
+  button.active-on { background: var(--ok-bg); color: var(--ok); border-color: var(--ok); }
+  button.active-off { background: var(--err-bg); color: var(--err); border-color: var(--err); }
+  button.active-auto { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
+  .cfg-form { display: grid; grid-template-columns: repeat(3, minmax(80px, 1fr)) auto; gap: 8px; align-items: end; }
+  @media (max-width: 520px) { .cfg-form { grid-template-columns: 1fr 1fr; } }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label { font-size: 11px; color: var(--muted); }
+  .field input { width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 5px; background: var(--surface-alt); color: var(--text); font-family: ui-monospace, monospace; font-size: 13px; }
+  .cfg-hint { margin-top: 8px; font-size: 12px; color: var(--muted); }
+  .cfg-hint.err { color: var(--err); }
+  .nodes-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  @media (max-width: 760px) { .nodes-grid { grid-template-columns: repeat(2, 1fr); } }
+  .node-box { border: 1px solid var(--line); border-radius: 5px; padding: 10px; background: var(--surface-alt); }
+  .node-top { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+  .node-name { font-weight: 600; font-size: 13px; }
+  .node-role { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .node-addr { font-size: 11px; font-family: ui-monospace, monospace; color: var(--muted); margin-top: 6px; }
+  .chart-wrap { position: relative; height: 280px; }
+  canvas { width: 100% !important; height: 100% !important; }
+  .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+  .tab { padding: 4px 10px; font-size: 12px; border-radius: 4px; border: 1px solid var(--line); background: var(--surface-alt); color: var(--muted); cursor: pointer; }
+  .tab.active { background: var(--accent-bg); color: var(--accent); border-color: var(--accent); }
+  .log-wrap { max-height: 300px; overflow: auto; border-top: 1px solid var(--line); }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
   th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
-  td.payload { font-family: ui-monospace, monospace; word-break: break-all; }
+  th { position: sticky; top: 0; background: var(--surface); color: var(--muted); font-weight: 600; font-size: 11px; text-transform: uppercase; }
+  td.mono { font-family: ui-monospace, monospace; word-break: break-word; }
+  .lvl { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 11px; font-family: ui-monospace, monospace; font-weight: 600; }
+  .lvl-info { background: var(--accent-bg); color: var(--accent); }
+  .lvl-warn { background: var(--warn-bg); color: var(--warn); }
+  .lvl-error { background: var(--err-bg); color: var(--err); }
+  .lvl-rx { background: var(--ok-bg); color: var(--ok); }
+  .lvl-tx { background: var(--surface-alt); color: var(--muted); border: 1px solid var(--line); }
 </style>
 </head>
 <body>
 <main>
   <header>
-    <h1>Monitor Pompa Otomatis</h1>
-    <div class="status" id="conn">Menghubungkan...</div>
+    <div class="title-wrap">
+      <h1>Monitor Pompa BLE Mesh</h1>
+      <span class="subtitle" id="uptime">uptime --</span>
+    </div>
+    <div class="header-meta">
+      <span class="badge" id="proxyBadge">Proxy: --</span>
+      <span class="badge" id="txBadge">TX: +20 dBm</span>
+      <span class="badge" id="conn"><span class="dot"></span><span id="connText">Menghubungkan...</span></span>
+    </div>
   </header>
 
   <section class="cards">
-    <div class="card"><div class="label">Suhu</div><div class="value" id="temp">--</div></div>
-    <div class="card"><div class="label">Kelembapan</div><div class="value" id="hum">--</div></div>
-    <div class="card"><div class="label">Pompa</div><div class="value" id="pump">--</div></div>
-    <div class="card"><div class="label">Sinyal Wi-Fi gateway</div><div class="value" id="rssi">--</div></div>
-  </section>
-
-  <section class="panel"><canvas id="chart"></canvas></section>
-
-  <section class="panel">
-    <div class="controls">
-      <button data-cmd='{"pump": 1}'>Pompa ON</button>
-      <button data-cmd='{"pump": 0}'>Pompa OFF</button>
-      <button data-cmd='{"mode": "auto"}'>Mode auto</button>
+    <div class="card">
+      <div class="label">Suhu (DHT11)</div>
+      <div class="value" id="temp">--</div>
+      <div class="sub" id="threshSub">ON &ge; -- &deg;C &middot; OFF &lt; -- &deg;C</div>
+    </div>
+    <div class="card">
+      <div class="label">Kelembapan</div>
+      <div class="value" id="hum">--</div>
+      <div class="sub" id="seqSub">Seq #-- &middot; Menunggu data</div>
+    </div>
+    <div class="card">
+      <div class="label">Status Pompa</div>
+      <div class="value" id="pump">--</div>
+      <div class="sub" id="modeSub">Mode: --</div>
+    </div>
+    <div class="card">
+      <div class="label">Sinyal Radio</div>
+      <div class="value" id="rssi">--</div>
+      <div class="sub" id="bleRssiSub">BLE Mesh: -- dBm</div>
     </div>
   </section>
 
-  <section class="panel log">
-    <table>
-      <thead><tr><th>Waktu</th><th>Topik</th><th>Isi paket</th></tr></thead>
-      <tbody id="log"></tbody>
-    </table>
+  <section class="panel">
+    <div class="panel-head">
+      <h2 class="panel-title">Grafik Suhu &amp; Kelembapan</h2>
+      <span class="subtitle">Garis putus-putus: ambang ON / OFF</span>
+    </div>
+    <div class="chart-wrap"><canvas id="chart"></canvas></div>
+  </section>
+
+  <section class="grid-2">
+    <div class="panel">
+      <div class="panel-head">
+        <h2 class="panel-title">Kontrol Pompa</h2>
+        <span class="badge" id="pendingBadge" style="display:none">Menunggu ACK Node 1...</span>
+      </div>
+      <div class="controls">
+        <button id="btnOn" data-cmd='{"pump":1}'>Pompa ON</button>
+        <button id="btnOff" data-cmd='{"pump":0}'>Pompa OFF</button>
+        <button id="btnAuto" data-cmd='{"mode":"auto"}'>Mode Auto</button>
+      </div>
+      <div class="cfg-hint">Perintah manual mengunci mode MANUAL hingga Mode Auto ditekan. Retry otomatis aktif di Node 4.</div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <h2 class="panel-title">Threshold Auto &amp; Histeresis</h2>
+        <span class="subtitle">Tersimpan di NVS Node 4</span>
+      </div>
+      <form class="cfg-form" id="cfgForm">
+        <div class="field"><label for="inOn">Suhu ON (&deg;C)</label><input id="inOn" type="number" min="0" max="60" step="1" value="29" required></div>
+        <div class="field"><label for="inOff">Suhu OFF (&deg;C)</label><input id="inOff" type="number" min="0" max="60" step="1" value="27" required></div>
+        <div class="field"><label for="inHold">Min Hold (dtk)</label><input id="inHold" type="number" min="0" max="300" step="1" value="15" required></div>
+        <button type="submit" class="primary">Simpan</button>
+      </form>
+      <div class="cfg-hint" id="cfgHint">Pompa menyala saat suhu &ge; ON dan mati saat suhu &lt; OFF setelah melewati durasi tahan minimum.</div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2 class="panel-title">Topologi BLE Mesh</h2>
+      <span class="subtitle">Arsitektur 4-node (LPN &middot; Relay+Friend &middot; OnOff &middot; Prov+Proxy+GW)</span>
+    </div>
+    <div class="nodes-grid">
+      <div class="node-box">
+        <div class="node-top"><span class="node-name">Node 1 &middot; Pompa</span><span class="badge" id="st-pump">Menunggu</span></div>
+        <div class="node-role">Generic OnOff Server (wajib siaga)</div>
+        <div class="node-addr" id="addr-pump">Alamat: --</div>
+      </div>
+      <div class="node-box">
+        <div class="node-top"><span class="node-name">Node 2 &middot; Sensor</span><span class="badge" id="st-sensor">Menunggu</span></div>
+        <div class="node-role">DHT11 Low Power Node (LPN)</div>
+        <div class="node-addr" id="addr-sensor">Alamat: --</div>
+      </div>
+      <div class="node-box">
+        <div class="node-top"><span class="node-name">Node 3 &middot; Relay</span><span class="badge" id="st-relay">Menunggu</span></div>
+        <div class="node-role">Relay + Friend (wajib terjaga)</div>
+        <div class="node-addr" id="addr-relay">Alamat: --</div>
+      </div>
+      <div class="node-box">
+        <div class="node-top"><span class="node-name">Node 4 &middot; Gateway</span><span class="badge accent" id="st-gw">Aktif</span></div>
+        <div class="node-role">Provisioner + GATT Proxy + Wi-Fi MQTT</div>
+        <div class="node-addr" id="addr-gw">Alamat: 0x0001</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2 class="panel-title">Log Sistem &amp; Paket MQTT</h2>
+      <div class="tabs">
+        <button class="tab active" data-filter="all">Semua</button>
+        <button class="tab" data-filter="event">Event</button>
+        <button class="tab" data-filter="telemetry">Telemetri</button>
+        <button class="tab" data-filter="cmd">Perintah</button>
+        <button class="tab" id="btnClear">Bersihkan</button>
+      </div>
+    </div>
+    <div class="log-wrap">
+      <table>
+        <thead><tr><th style="width:90px">Waktu</th><th style="width:85px">Tipe</th><th style="width:90px">Sumber</th><th>Pesan / Payload</th></tr></thead>
+        <tbody id="logBody"></tbody>
+      </table>
+    </div>
   </section>
 </main>
 
@@ -74,85 +211,293 @@
 <script>
   const BROKER = "ws://localhost:9001";
   const TOPIC_TELEMETRY = "iot/mesh/telemetry";
+  const TOPIC_STATUS = "iot/mesh/status";
+  const TOPIC_LOG = "iot/mesh/log";
   const TOPIC_CMD = "iot/mesh/cmd";
   const MAX_POINTS = 60;
-  const MAX_LOG = 200;
+  const MAX_LOG = 250;
 
   const $ = (id) => document.getElementById(id);
   const labels = [];
   const temps = [];
   const hums = [];
+  const onLine = [];
+  const offLine = [];
+  const logs = [];
+  let activeFilter = "all";
+  let cfgState = { on_temp: 29, off_temp: 27, min_hold_s: 15 };
+  let cfgDirty = false;
+  let lastRxMs = 0;
 
   const chart = new Chart($("chart"), {
     type: "line",
     data: {
       labels,
       datasets: [
-        { label: "Suhu (°C)", data: temps, borderColor: "#e4572e", tension: 0.3, pointRadius: 0 },
-        { label: "Kelembapan (%)", data: hums, borderColor: "#17a2b8", tension: 0.3, pointRadius: 0 },
+        { label: "Suhu (°C)", data: temps, borderColor: "#dc2626", borderWidth: 2, tension: 0.25, pointRadius: 2 },
+        { label: "Kelembapan (%)", data: hums, borderColor: "#0284c7", borderWidth: 2, tension: 0.25, pointRadius: 2 },
+        { label: "Ambang ON (°C)", data: onLine, borderColor: "#ea580c", borderWidth: 1.5, borderDash: [6, 4], pointRadius: 0 },
+        { label: "Ambang OFF (°C)", data: offLine, borderColor: "#64748b", borderWidth: 1.5, borderDash: [4, 4], pointRadius: 0 },
       ],
     },
-    options: { animation: false, scales: { x: { ticks: { maxTicksLimit: 8 } } } },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: false,
+      scales: { x: { ticks: { maxTicksLimit: 8 } } },
+      plugins: { legend: { position: "bottom", labels: { boxWidth: 14, font: { size: 12 } } } },
+    },
   });
+
+  function formatUptime(sec) {
+    if (typeof sec !== "number" || sec < 0) return "uptime --";
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = Math.floor(sec % 60);
+    return `uptime ${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  }
+
+  function setConnBadge(text, cls) {
+    $("conn").className = "badge " + (cls || "");
+    $("connText").textContent = text;
+  }
+
+  function syncThresholdLines() {
+    for (let i = 0; i < labels.length; i++) {
+      onLine[i] = cfgState.on_temp;
+      offLine[i] = cfgState.off_temp;
+    }
+    $("threshSub").textContent = `ON ≥ ${cfgState.on_temp} °C · OFF < ${cfgState.off_temp} °C · hold ${cfgState.min_hold_s} dtk`;
+    chart.update();
+  }
+
+  function renderPump(pumpOn, mode, pending, targetPump) {
+    const el = $("pump");
+    el.textContent = pumpOn ? "ON" : "OFF";
+    el.className = "value " + (pumpOn ? "pump-on" : "pump-off");
+
+    const modeText = (mode || "auto").toUpperCase();
+    $("modeSub").textContent = pending
+      ? `Mode: ${modeText} · target ${targetPump ? "ON" : "OFF"}`
+      : `Mode: ${modeText}`;
+
+    const pb = $("pendingBadge");
+    if (pending) {
+      pb.style.display = "inline-flex";
+      pb.className = "badge warn";
+      pb.textContent = `Mengirim ${targetPump ? "ON" : "OFF"} ke Node 1...`;
+    } else {
+      pb.style.display = "none";
+    }
+
+    $("btnOn").className = (mode === "manual" && (pending ? targetPump : pumpOn)) ? "active-on" : "";
+    $("btnOff").className = (mode === "manual" && !(pending ? targetPump : pumpOn)) ? "active-off" : "";
+    $("btnAuto").className = (mode === "auto") ? "active-auto" : "";
+  }
+
+  function renderNodes(nodes) {
+    const map = {};
+    (nodes || []).forEach((n) => { map[n.role] = n; });
+    ["pump", "sensor", "relay"].forEach((role) => {
+      const st = $("st-" + role);
+      const addr = $("addr-" + role);
+      const info = map[role];
+      if (!info) {
+        st.textContent = "Menunggu";
+        st.className = "badge";
+        addr.textContent = "Alamat: --";
+      } else if (info.ready) {
+        st.textContent = "Siap";
+        st.className = "badge ok";
+        addr.textContent = "Alamat: " + info.addr;
+      } else {
+        st.textContent = "Konfigurasi...";
+        st.className = "badge warn";
+        addr.textContent = "Alamat: " + info.addr;
+      }
+    });
+  }
+
+  function addLog(category, level, src, text) {
+    logs.unshift({ time: new Date().toLocaleTimeString(), category, level, src, text });
+    if (logs.length > MAX_LOG) logs.pop();
+    renderLogs();
+  }
+
+  function renderLogs() {
+    const body = $("logBody");
+    body.replaceChildren();
+    const filtered = activeFilter === "all" ? logs : logs.filter((l) => l.category === activeFilter);
+    for (const item of filtered) {
+      const tr = document.createElement("tr");
+      const tdTime = document.createElement("td");
+      tdTime.className = "mono";
+      tdTime.textContent = item.time;
+
+      const tdLvl = document.createElement("td");
+      const span = document.createElement("span");
+      span.className = "lvl lvl-" + item.level;
+      span.textContent = item.level.toUpperCase();
+      tdLvl.appendChild(span);
+
+      const tdSrc = document.createElement("td");
+      tdSrc.className = "mono";
+      tdSrc.textContent = item.src;
+
+      const tdMsg = document.createElement("td");
+      tdMsg.className = "mono";
+      tdMsg.textContent = item.text;
+
+      tr.append(tdTime, tdLvl, tdSrc, tdMsg);
+      body.appendChild(tr);
+    }
+  }
 
   const client = mqtt.connect(BROKER, { reconnectPeriod: 2000 });
 
   client.on("connect", () => {
-    $("conn").textContent = "Terhubung ke " + BROKER;
-    client.subscribe(TOPIC_TELEMETRY);
+    setConnBadge("Terhubung", "ok");
+    client.subscribe([TOPIC_TELEMETRY, TOPIC_STATUS, TOPIC_LOG]);
+    addLog("event", "info", "DASH", "Terhubung ke broker " + BROKER);
   });
-  client.on("reconnect", () => { $("conn").textContent = "Menyambung ulang..."; });
-  client.on("close", () => { $("conn").textContent = "Terputus"; });
-  client.on("error", (err) => { $("conn").textContent = "Error: " + err.message; });
+  client.on("reconnect", () => setConnBadge("Menyambung ulang...", "warn"));
+  client.on("close", () => setConnBadge("Terputus", "err"));
+  client.on("error", (err) => setConnBadge("Error: " + err.message, "err"));
 
   client.on("message", (topic, payload) => {
     const text = payload.toString();
-    addLog(topic, text);
-    if (topic !== TOPIC_TELEMETRY) return;
+    let data;
     try {
-      update(JSON.parse(text));
-    } catch (err) {
-      console.warn("Paket bukan JSON valid", err);
+      data = JSON.parse(text);
+    } catch {
+      addLog("event", "warn", "MQTT", `${topic}: ${text}`);
+      return;
+    }
+
+    if (topic === TOPIC_TELEMETRY) {
+      addLog("telemetry", "rx", "SENSOR",
+        `T=${Number(data.temp).toFixed(1)}°C H=${Number(data.hum).toFixed(0)}% pump=${data.pump} mode=${data.mode || "-"} seq=#${data.seq ?? "-"} ble=${data.ble_rssi ?? "-"}dBm wifi=${data.rssi}dBm`);
+      handleTelemetry(data);
+    } else if (topic === TOPIC_STATUS) {
+      handleStatus(data);
+    } else if (topic === TOPIC_LOG) {
+      addLog("event", data.level || "info", data.src || "GW", data.msg || text);
     }
   });
 
-  document.querySelectorAll("button[data-cmd]").forEach((btn) => {
-    btn.addEventListener("click", () => client.publish(TOPIC_CMD, btn.dataset.cmd));
-  });
+  function handleTelemetry(d) {
+    const now = Date.now();
+    const dtSec = lastRxMs ? ((now - lastRxMs) / 1000).toFixed(1) + "s" : "baru";
+    lastRxMs = now;
 
-  function update(d) {
     labels.push(new Date().toLocaleTimeString());
     temps.push(d.temp);
     hums.push(d.hum);
+    onLine.push(cfgState.on_temp);
+    offLine.push(cfgState.off_temp);
     if (labels.length > MAX_POINTS) {
       labels.shift();
       temps.shift();
       hums.shift();
+      onLine.shift();
+      offLine.shift();
     }
     chart.update();
 
-    $("temp").textContent = d.temp.toFixed(1) + " °C";
-    $("hum").textContent = d.hum.toFixed(1) + " %";
-    $("rssi").textContent = d.rssi + " dBm";
-    const on = d.pump === 1;
-    $("pump").textContent = on ? "ON" : "OFF";
-    $("pump").className = "value " + (on ? "pump-on" : "pump-off");
+    $("temp").textContent = Number(d.temp).toFixed(1) + " °C";
+    $("hum").textContent = Number(d.hum).toFixed(0) + " %";
+    $("seqSub").textContent = `Seq #${d.seq ?? "--"} · interval ${dtSec}`;
+    $("rssi").textContent = `${d.rssi} dBm`;
+    $("bleRssiSub").textContent = `BLE Mesh: ${d.ble_rssi !== undefined ? d.ble_rssi + " dBm" : "--"}`;
+    if (typeof d.uptime === "number") $("uptime").textContent = formatUptime(d.uptime);
+    renderPump(d.pump === 1, d.mode || "auto", d.target_pump !== undefined && d.target_pump !== d.pump, d.target_pump === 1);
   }
 
-  function addLog(topic, text) {
-    const row = document.createElement("tr");
-    [new Date().toLocaleTimeString(), topic, text].forEach((value, i) => {
-      const td = document.createElement("td");
-      td.textContent = value;
-      if (i === 2) td.className = "payload";
-      row.appendChild(td);
-    });
-    const body = $("log");
-    body.prepend(row);
-    while (body.children.length > MAX_LOG) {
-      body.lastElementChild.remove();
+  function handleStatus(s) {
+    if (typeof s.uptime === "number") $("uptime").textContent = formatUptime(s.uptime);
+    if (typeof s.tx_power_dbm === "number") $("txBadge").textContent = `TX: +${s.tx_power_dbm} dBm`;
+
+    const pb = $("proxyBadge");
+    if (s.proxy_connected) {
+      pb.textContent = "Proxy: Client Terhubung";
+      pb.className = "badge ok";
+    } else if (s.proxy_enabled) {
+      pb.textContent = "Proxy: Aktif";
+      pb.className = "badge accent";
+    } else {
+      pb.textContent = "Proxy: Nonaktif";
+      pb.className = "badge err";
     }
+
+    if (typeof s.on_temp === "number" && typeof s.off_temp === "number") {
+      cfgState = {
+        on_temp: s.on_temp,
+        off_temp: s.off_temp,
+        min_hold_s: typeof s.min_hold_s === "number" ? s.min_hold_s : cfgState.min_hold_s,
+      };
+      if (!cfgDirty) {
+        $("inOn").value = cfgState.on_temp;
+        $("inOff").value = cfgState.off_temp;
+        $("inHold").value = cfgState.min_hold_s;
+      }
+      syncThresholdLines();
+    }
+
+    renderPump(s.pump === 1, s.mode || "auto", !!s.pending, s.target_pump === 1);
+    renderNodes(s.nodes);
   }
+
+  document.querySelectorAll("button[data-cmd]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const payload = btn.dataset.cmd;
+      client.publish(TOPIC_CMD, payload, { qos: 1 });
+      addLog("cmd", "tx", "CMD", payload);
+    });
+  });
+
+  ["inOn", "inOff", "inHold"].forEach((id) => {
+    $(id).addEventListener("input", () => { cfgDirty = true; });
+  });
+
+  $("cfgForm").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const onT = parseInt($("inOn").value, 10);
+    const offT = parseInt($("inOff").value, 10);
+    const holdS = parseInt($("inHold").value, 10);
+    const hint = $("cfgHint");
+
+    if (Number.isNaN(onT) || Number.isNaN(offT) || Number.isNaN(holdS)) {
+      hint.textContent = "Semua nilai threshold harus berupa angka bulat.";
+      hint.className = "cfg-hint err";
+      return;
+    }
+    if (offT > onT) {
+      hint.textContent = "Suhu OFF tidak boleh lebih besar dari Suhu ON.";
+      hint.className = "cfg-hint err";
+      return;
+    }
+
+    const payload = JSON.stringify({ on_temp: onT, off_temp: offT, min_hold_s: holdS });
+    client.publish(TOPIC_CMD, payload, { qos: 1 });
+    addLog("cmd", "tx", "CFG", payload);
+    cfgDirty = false;
+    hint.textContent = `Threshold dikirim (ON ≥ ${onT} °C, OFF < ${offT} °C, hold ${holdS} dtk).`;
+    hint.className = "cfg-hint";
+  });
+
+  document.querySelectorAll(".tab[data-filter]").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      activeFilter = tab.dataset.filter;
+      document.querySelectorAll(".tab[data-filter]").forEach((t) => t.classList.remove("active"));
+      tab.classList.add("active");
+      renderLogs();
+    });
+  });
+
+  $("btnClear").addEventListener("click", () => {
+    logs.length = 0;
+    renderLogs();
+  });
 </script>
 </body>
 </html>

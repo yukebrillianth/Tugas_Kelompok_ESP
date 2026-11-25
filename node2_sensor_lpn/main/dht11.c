@@ -25,10 +25,10 @@ bool dht11_read(gpio_num_t pin, sensor_reading_t *out)
 {
     uint8_t data[5] = {0};
 
-    /* Start: tarik LOW minimal 18 ms, lalu lepas. */
+    /* Start: tarik LOW minimal 18 ms dengan vTaskDelay agar tidak memblokir CPU/BLE. */
     gpio_set_direction(pin, GPIO_MODE_OUTPUT_OD);
     gpio_set_level(pin, 0);
-    esp_rom_delay_us(18000);
+    vTaskDelay(pdMS_TO_TICKS(20));
     gpio_set_level(pin, 1);
     esp_rom_delay_us(30);
     gpio_set_direction(pin, GPIO_MODE_INPUT);

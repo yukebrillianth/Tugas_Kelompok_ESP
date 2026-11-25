@@ -1,9 +1,13 @@
+#include <stdio.h>
 #include <string.h>
 
 #include "esp_check.h"
 #include "esp_log.h"
 #include "esp_random.h"
+#include "esp_timer.h"
 #include "nvs.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 
 #include "esp_ble_mesh_defs.h"
 #include "esp_ble_mesh_common_api.h"
@@ -12,16 +16,18 @@
 #include "esp_ble_mesh_config_model_api.h"
 #include "esp_ble_mesh_generic_model_api.h"
 #include "esp_ble_mesh_local_data_operation_api.h"
+#include "esp_ble_mesh_proxy_api.h"
 
 #include "mesh_bt.h"
 #include "mesh_config.h"
 #include "mesh_prov.h"
 
-#define TAG         "PROV"
-#define MAX_NODES   5
-#define OWN_ADDR    0x0001
-#define MSG_TTL     3
-#define CFG_RETRY   3
+#define TAG                 "PROV"
+#define OWN_ADDR            0x0001
+#define MSG_TTL             5
+#define CFG_RETRY           3
+#define PUMP_MAX_RETRY      3
+#define PUMP_RETRY_DELAY_US (600 * 1000LL)
 
 typedef struct {
     uint8_t uuid[16];
@@ -35,7 +41,7 @@ typedef struct {
 /* Disimpan di NVS supaya node tidak perlu di-provision ulang setelah reboot. */
 typedef struct {
     uint8_t app_key[16];
-    node_t nodes[MAX_NODES];
+    node_t nodes[MESH_MAX_NODES];
 } store_t;
 
 enum { ACT_APPKEY, ACT_BIND_ONOFF, ACT_BIND_VND, ACT_PUB_VND, ACT_END };
@@ -49,8 +55,43 @@ static uint8_t dev_uuid[16];
 static uint8_t tid;
 static esp_ble_mesh_client_t cfg_cli;
 static esp_ble_mesh_client_t onoff_cli;
+
 static mesh_sensor_cb_t sensor_cb;
 static mesh_pump_cb_t pump_cb;
+static mesh_log_cb_t log_cb;
+static mesh_status_cb_t status_cb;
+
+static bool proxy_enabled;
+static bool proxy_connected;
+
+/* Desired-state pump controller (thread-safe antara MQTT task dan BTC task). */
+static SemaphoreHandle_t pump_mux;
+static esp_timer_handle_t pump_retry_timer;
+static bool pump_has_target;
+static bool pump_target;
+static bool pump_in_flight;
+static bool pump_in_flight_val;
+static uint8_t pump_retry;
+
+/* Deduplikasi paket sensor anti-burst. */
+static uint16_t last_sensor_addr;
+static uint8_t last_sensor_seq;
+static bool last_sensor_has_seq;
+static int64_t last_sensor_us;
+
+static void emit_log(const char *level, const char *src, const char *msg)
+{
+    if (log_cb) {
+        log_cb(level, src, msg);
+    }
+}
+
+static void emit_status(void)
+{
+    if (status_cb) {
+        status_cb();
+    }
+}
 
 static esp_ble_mesh_cfg_srv_t cfg_srv = {
     .net_transmit = ESP_BLE_MESH_TRANSMIT(2, 20),
@@ -63,7 +104,7 @@ static esp_ble_mesh_cfg_srv_t cfg_srv = {
 };
 
 static esp_ble_mesh_model_op_t vnd_op[] = {
-    ESP_BLE_MESH_MODEL_OP(MESH_VND_OP_DATA, SENSOR_PAYLOAD_LEN),
+    ESP_BLE_MESH_MODEL_OP(MESH_VND_OP_DATA, SENSOR_PAYLOAD_LEN_V1),
     ESP_BLE_MESH_MODEL_OP_END,
 };
 
@@ -88,6 +129,7 @@ static esp_ble_mesh_comp_t composition = {
 };
 
 static esp_ble_mesh_prov_t provision = {
+    .uuid = dev_uuid,
     .prov_uuid = dev_uuid,
     .prov_unicast_addr = OWN_ADDR,
     .prov_start_address = 0x0005,
@@ -129,7 +171,7 @@ static void store_load(void)
 
 static node_t *node_by_addr(uint16_t addr)
 {
-    for (int i = 0; i < MAX_NODES; i++) {
+    for (int i = 0; i < MESH_MAX_NODES; i++) {
         if (store.nodes[i].used && store.nodes[i].addr == addr) {
             return &store.nodes[i];
         }
@@ -139,7 +181,7 @@ static node_t *node_by_addr(uint16_t addr)
 
 static node_t *node_by_role(uint8_t role)
 {
-    for (int i = 0; i < MAX_NODES; i++) {
+    for (int i = 0; i < MESH_MAX_NODES; i++) {
         if (store.nodes[i].used && store.nodes[i].role == role) {
             return &store.nodes[i];
         }
@@ -150,12 +192,12 @@ static node_t *node_by_role(uint8_t role)
 static node_t *node_add(const uint8_t uuid[16], uint16_t addr)
 {
     node_t *n = NULL;
-    for (int i = 0; i < MAX_NODES && !n; i++) {
+    for (int i = 0; i < MESH_MAX_NODES && !n; i++) {
         if (store.nodes[i].used && memcmp(store.nodes[i].uuid, uuid, 16) == 0) {
             n = &store.nodes[i];
         }
     }
-    for (int i = 0; i < MAX_NODES && !n; i++) {
+    for (int i = 0; i < MESH_MAX_NODES && !n; i++) {
         if (!store.nodes[i].used) {
             n = &store.nodes[i];
         }
@@ -199,8 +241,12 @@ static void cfg_send(node_t *n)
 {
     int act = cfg_action(n);
     if (act == ACT_END) {
-        ESP_LOGI(TAG, "Node 0x%04x selesai dikonfigurasi", n->addr);
+        char msg[96];
+        snprintf(msg, sizeof(msg), "Node 0x%04x (role 0x%02x) selesai dikonfigurasi", n->addr, n->role);
+        ESP_LOGI(TAG, "%s", msg);
         store_save();
+        emit_log("info", "PROV", msg);
+        emit_status();
         return;
     }
 
@@ -237,7 +283,8 @@ static void cfg_send(node_t *n)
         s.model_pub_set.publish_app_idx = MESH_APP_IDX;
         s.model_pub_set.publish_ttl = 7;
         s.model_pub_set.publish_period = 0;
-        s.model_pub_set.publish_retransmit = ESP_BLE_MESH_TRANSMIT(2, 20);
+        /* Tanpa publish_retransmit berlebih: andalkan net_transmit agar tidak burst. */
+        s.model_pub_set.publish_retransmit = 0;
         s.model_pub_set.model_id = MESH_VND_MODEL_ID;
         s.model_pub_set.company_id = MESH_CID;
         break;
@@ -269,22 +316,175 @@ static void cfg_cb(esp_ble_mesh_cfg_client_cb_event_t event, esp_ble_mesh_cfg_cl
     }
 
     if (++n->retry > CFG_RETRY) {
-        ESP_LOGE(TAG, "Config ke 0x%04x gagal setelah %d kali coba", n->addr, CFG_RETRY);
+        char msg[96];
+        snprintf(msg, sizeof(msg), "Config ke 0x%04x gagal setelah %d kali coba", n->addr, CFG_RETRY);
+        ESP_LOGE(TAG, "%s", msg);
+        emit_log("error", "PROV", msg);
         return;
     }
-    ESP_LOGW(TAG, "Config ke 0x%04x belum berhasil, coba lagi", n->addr);
+    ESP_LOGW(TAG, "Config ke 0x%04x belum berhasil, coba lagi (%u/%d)", n->addr, n->retry, CFG_RETRY);
     cfg_send(n);
+}
+
+static esp_err_t pump_dispatch_locked(uint16_t addr, bool on)
+{
+    esp_ble_mesh_client_common_param_t c = {0};
+    esp_ble_mesh_generic_client_set_state_t s = {0};
+    c.model = onoff_cli.model;
+    c.opcode = ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET;
+    c.ctx.net_idx = MESH_NET_IDX;
+    c.ctx.app_idx = MESH_APP_IDX;
+    c.ctx.addr = addr;
+    c.ctx.send_ttl = MSG_TTL;
+    s.onoff_set.onoff = on;
+    s.onoff_set.tid = tid++;
+
+    pump_in_flight = true;
+    pump_in_flight_val = on;
+
+    esp_err_t err = esp_ble_mesh_generic_client_set_state(&c, &s);
+    if (err != ESP_OK) {
+        pump_in_flight = false;
+    }
+    return err;
+}
+
+static void pump_retry_cb(void *arg)
+{
+    bool schedule_fail = false;
+    bool fail_val = false;
+    bool retry_sent = false;
+    bool val_to_send = false;
+    uint8_t cur_retry = 0;
+
+    xSemaphoreTake(pump_mux, portMAX_DELAY);
+    if (pump_has_target && !pump_in_flight) {
+        node_t *n = node_by_role(MESH_ROLE_PUMP);
+        if (n && cfg_action(n) == ACT_END) {
+            val_to_send = pump_target;
+            cur_retry = pump_retry;
+            esp_err_t err = pump_dispatch_locked(n->addr, val_to_send);
+            if (err == ESP_OK) {
+                retry_sent = true;
+            } else if (pump_retry < PUMP_MAX_RETRY) {
+                pump_retry++;
+                esp_timer_start_once(pump_retry_timer, PUMP_RETRY_DELAY_US);
+            } else {
+                pump_has_target = false;
+                schedule_fail = true;
+                fail_val = val_to_send;
+            }
+        } else {
+            pump_has_target = false;
+        }
+    }
+    xSemaphoreGive(pump_mux);
+
+    if (retry_sent) {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "Kirim ulang perintah pompa %s (percobaan %u/%d)",
+                 val_to_send ? "ON" : "OFF", cur_retry, PUMP_MAX_RETRY);
+        ESP_LOGW(TAG, "%s", msg);
+        emit_log("warn", "PUMP", msg);
+    } else if (schedule_fail) {
+        char msg[96];
+        snprintf(msg, sizeof(msg), "Perintah pompa %s gagal dikirim ke Node 1", fail_val ? "ON" : "OFF");
+        ESP_LOGE(TAG, "%s", msg);
+        emit_log("error", "PUMP", msg);
+        if (pump_cb) {
+            pump_cb(fail_val, false, true);
+        }
+    }
 }
 
 static void generic_cb(esp_ble_mesh_generic_client_cb_event_t event,
                        esp_ble_mesh_generic_client_cb_param_t *param)
 {
-    if (param->error_code != ESP_OK) {
-        ESP_LOGW(TAG, "Perintah ke pompa gagal (%d)", param->error_code);
+    if (event == ESP_BLE_MESH_GENERIC_CLIENT_SET_STATE_EVT && param->error_code == ESP_OK) {
+        bool actual = param->status_cb.onoff_status.present_onoff;
+        bool need_followup = false;
+        bool next_val = false;
+        uint16_t pump_addr = 0;
+
+        xSemaphoreTake(pump_mux, portMAX_DELAY);
+        pump_in_flight = false;
+        pump_retry = 0;
+        if (pump_has_target && pump_target != actual) {
+            node_t *n = node_by_role(MESH_ROLE_PUMP);
+            if (n && cfg_action(n) == ACT_END) {
+                need_followup = true;
+                next_val = pump_target;
+                pump_addr = n->addr;
+            } else {
+                pump_has_target = false;
+            }
+        } else {
+            pump_has_target = false;
+        }
+        xSemaphoreGive(pump_mux);
+
+        if (pump_cb) {
+            pump_cb(actual, true, false);
+        }
+
+        if (need_followup) {
+            xSemaphoreTake(pump_mux, portMAX_DELAY);
+            esp_err_t err = pump_dispatch_locked(pump_addr, next_val);
+            if (err != ESP_OK) {
+                esp_timer_start_once(pump_retry_timer, PUMP_RETRY_DELAY_US);
+            }
+            xSemaphoreGive(pump_mux);
+
+            char msg[96];
+            snprintf(msg, sizeof(msg), "Lanjut kirim perintah pompa tertunda: %s", next_val ? "ON" : "OFF");
+            ESP_LOGI(TAG, "%s", msg);
+            emit_log("info", "PUMP", msg);
+        }
         return;
     }
-    if (event == ESP_BLE_MESH_GENERIC_CLIENT_SET_STATE_EVT) {
-        pump_cb(param->status_cb.onoff_status.present_onoff);
+
+    if (event == ESP_BLE_MESH_GENERIC_CLIENT_TIMEOUT_EVT ||
+        (event == ESP_BLE_MESH_GENERIC_CLIENT_SET_STATE_EVT && param->error_code != ESP_OK)) {
+        bool exhausted = false;
+        bool target_val = false;
+        uint8_t next_retry = 0;
+
+        xSemaphoreTake(pump_mux, portMAX_DELAY);
+        pump_in_flight = false;
+        if (pump_has_target) {
+            target_val = pump_target;
+            if (pump_target != pump_in_flight_val) {
+                /* Perintah baru menggantikan yang timeout: reset counter retry. */
+                pump_retry = 0;
+            }
+            if (pump_retry < PUMP_MAX_RETRY) {
+                pump_retry++;
+                next_retry = pump_retry;
+                esp_timer_stop(pump_retry_timer);
+                esp_timer_start_once(pump_retry_timer, PUMP_RETRY_DELAY_US);
+            } else {
+                pump_has_target = false;
+                exhausted = true;
+            }
+        }
+        xSemaphoreGive(pump_mux);
+
+        if (exhausted) {
+            char msg[96];
+            snprintf(msg, sizeof(msg), "Pompa %s timeout setelah %d kali retry",
+                     target_val ? "ON" : "OFF", PUMP_MAX_RETRY);
+            ESP_LOGE(TAG, "%s", msg);
+            emit_log("error", "PUMP", msg);
+            if (pump_cb) {
+                pump_cb(target_val, false, true);
+            }
+        } else if (next_retry > 0) {
+            char msg[96];
+            snprintf(msg, sizeof(msg), "Perintah pompa %s timeout, jadwalkan retry %u/%d",
+                     target_val ? "ON" : "OFF", next_retry, PUMP_MAX_RETRY);
+            ESP_LOGW(TAG, "%s", msg);
+            emit_log("warn", "PUMP", msg);
+        }
     }
 }
 
@@ -322,7 +522,11 @@ static void prov_cb(esp_ble_mesh_prov_cb_event_t event, esp_ble_mesh_prov_cb_par
             ESP_LOGE(TAG, "Tabel node penuh, device 0x%04x diabaikan", addr);
             break;
         }
-        ESP_LOGI(TAG, "Provisioning sukses: peran 0x%02x, alamat 0x%04x", n->role, addr);
+        char msg[96];
+        snprintf(msg, sizeof(msg), "Provisioning sukses: peran 0x%02x, alamat 0x%04x", n->role, addr);
+        ESP_LOGI(TAG, "%s", msg);
+        emit_log("info", "PROV", msg);
+        emit_status();
         cfg_send(n);
         break;
     }
@@ -333,6 +537,18 @@ static void prov_cb(esp_ble_mesh_prov_cb_event_t event, esp_ble_mesh_prov_cb_par
             esp_ble_mesh_provisioner_bind_app_key_to_local_model(OWN_ADDR, MESH_APP_IDX,
                 MESH_VND_MODEL_ID, MESH_CID);
         }
+        break;
+    case ESP_BLE_MESH_PROXY_SERVER_CONNECTED_EVT:
+        proxy_connected = true;
+        ESP_LOGI(TAG, "GATT Proxy client terhubung (conn %u)", param->proxy_server_connected.conn_handle);
+        emit_log("info", "PROXY", "GATT Proxy client terhubung");
+        emit_status();
+        break;
+    case ESP_BLE_MESH_PROXY_SERVER_DISCONNECTED_EVT:
+        proxy_connected = false;
+        ESP_LOGI(TAG, "GATT Proxy client terputus (reason 0x%02x)", param->proxy_server_disconnected.reason);
+        emit_log("info", "PROXY", "GATT Proxy client terputus");
+        emit_status();
         break;
     default:
         break;
@@ -348,15 +564,55 @@ static void model_cb(esp_ble_mesh_model_cb_event_t event, esp_ble_mesh_model_cb_
     sensor_reading_t r;
     if (!sensor_decode(param->model_operation.msg, param->model_operation.length, &r)) {
         ESP_LOGW(TAG, "Payload sensor tidak valid, dibuang");
+        emit_log("warn", "SENSOR", "Payload sensor tidak valid, dibuang");
         return;
     }
-    sensor_cb(&r);
+
+    uint16_t src = param->model_operation.ctx->addr;
+    int8_t rssi = param->model_operation.ctx->recv_rssi;
+    int64_t now = esp_timer_get_time();
+
+    /* Deduplikasi anti-burst untuk retransmit atau relay yang lolos cache. */
+    if (src == last_sensor_addr) {
+        if (r.has_seq && last_sensor_has_seq && r.seq == last_sensor_seq &&
+            (now - last_sensor_us) < 15000000LL) {
+            ESP_LOGD(TAG, "Buang duplikat sensor #%u dari 0x%04x", r.seq, src);
+            return;
+        }
+        if (!r.has_seq && (now - last_sensor_us) < 1500000LL) {
+            ESP_LOGD(TAG, "Buang burst sensor (legacy) dari 0x%04x", src);
+            return;
+        }
+    }
+    last_sensor_addr = src;
+    last_sensor_seq = r.seq;
+    last_sensor_has_seq = r.has_seq;
+    last_sensor_us = now;
+
+    if (sensor_cb) {
+        sensor_cb(&r, src, rssi);
+    }
 }
 
-esp_err_t mesh_prov_start(mesh_sensor_cb_t on_sensor, mesh_pump_cb_t on_pump)
+esp_err_t mesh_prov_start(mesh_sensor_cb_t on_sensor,
+                          mesh_pump_cb_t on_pump,
+                          mesh_log_cb_t on_log,
+                          mesh_status_cb_t on_status)
 {
     sensor_cb = on_sensor;
     pump_cb = on_pump;
+    log_cb = on_log;
+    status_cb = on_status;
+
+    pump_mux = xSemaphoreCreateMutex();
+    if (!pump_mux) {
+        return ESP_ERR_NO_MEM;
+    }
+    esp_timer_create_args_t targs = {
+        .callback = pump_retry_cb,
+        .name = "pump_retry",
+    };
+    ESP_RETURN_ON_ERROR(esp_timer_create(&targs, &pump_retry_timer), TAG, "timer gagal");
 
     store_load();
     ESP_RETURN_ON_ERROR(mesh_bt_init(), TAG, "BT init gagal");
@@ -378,27 +634,75 @@ esp_err_t mesh_prov_start(mesh_sensor_cb_t on_sensor, mesh_pump_cb_t on_pump)
     ESP_RETURN_ON_ERROR(esp_ble_mesh_model_subscribe_group_addr(OWN_ADDR, MESH_CID, MESH_VND_MODEL_ID,
                                                                MESH_GROUP_SENSOR), TAG, "");
 
-    ESP_LOGI(TAG, "Provisioner aktif, memantau perangkat tag 0x%02x", MESH_UUID_TAG);
+    /* Aktifkan GATT Proxy Server pada Node 4 sesuai arsitektur Provisioner + Proxy + Gateway. */
+    esp_err_t perr = esp_ble_mesh_proxy_gatt_enable();
+    if (perr == ESP_OK) {
+        proxy_enabled = true;
+        ESP_LOGI(TAG, "GATT Proxy Server aktif");
+    } else {
+        proxy_enabled = false;
+        ESP_LOGW(TAG, "GATT Proxy Server belum bisa diaktifkan: %s", esp_err_to_name(perr));
+    }
+
+    ESP_LOGI(TAG, "Provisioner + Proxy aktif (TX +20 dBm), memantau perangkat tag 0x%02x", MESH_UUID_TAG);
     return ESP_OK;
 }
 
 esp_err_t mesh_prov_set_pump(bool on)
 {
+    xSemaphoreTake(pump_mux, portMAX_DELAY);
     node_t *n = node_by_role(MESH_ROLE_PUMP);
     if (!n || cfg_action(n) != ACT_END) {
+        xSemaphoreGive(pump_mux);
         return ESP_ERR_INVALID_STATE;
     }
 
-    esp_ble_mesh_client_common_param_t c = {0};
-    esp_ble_mesh_generic_client_set_state_t s = {0};
-    c.model = onoff_cli.model;
-    c.opcode = ESP_BLE_MESH_MODEL_OP_GEN_ONOFF_SET;
-    c.ctx.net_idx = MESH_NET_IDX;
-    c.ctx.app_idx = MESH_APP_IDX;
-    c.ctx.addr = n->addr;
-    c.ctx.send_ttl = MSG_TTL;
-    s.onoff_set.onoff = on;
-    s.onoff_set.tid = tid++;
+    pump_target = on;
+    pump_has_target = true;
 
-    return esp_ble_mesh_generic_client_set_state(&c, &s);
+    if (pump_in_flight) {
+        /* Transaksi sebelumnya masih berjalan: target terbaru disimpan dan dikirim otomatis setelah selesai. */
+        xSemaphoreGive(pump_mux);
+        return ESP_OK;
+    }
+
+    pump_retry = 0;
+    esp_timer_stop(pump_retry_timer);
+    esp_err_t err = pump_dispatch_locked(n->addr, on);
+    if (err != ESP_OK) {
+        pump_retry = 1;
+        esp_timer_start_once(pump_retry_timer, PUMP_RETRY_DELAY_US);
+    }
+    xSemaphoreGive(pump_mux);
+    return ESP_OK;
+}
+
+void mesh_prov_get_status(mesh_status_t *out)
+{
+    if (!out) {
+        return;
+    }
+    memset(out, 0, sizeof(*out));
+    out->proxy_enabled = proxy_enabled;
+    out->proxy_connected = proxy_connected;
+    for (int i = 0; i < MESH_MAX_NODES; i++) {
+        if (store.nodes[i].used) {
+            int idx = out->node_count++;
+            out->nodes[idx].addr = store.nodes[i].addr;
+            out->nodes[idx].role = store.nodes[i].role;
+            out->nodes[idx].ready = (cfg_action(&store.nodes[i]) == ACT_END);
+        }
+    }
+}
+
+bool mesh_prov_pump_pending(bool *target_out)
+{
+    bool pending;
+    xSemaphoreTake(pump_mux, portMAX_DELAY);
+    pending = pump_has_target || pump_in_flight;
+    if (target_out) {
+        *target_out = pump_target;
+    }
+    xSemaphoreGive(pump_mux);
+    return pending;
 }

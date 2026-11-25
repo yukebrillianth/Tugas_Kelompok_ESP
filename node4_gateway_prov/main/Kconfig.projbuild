@@ -26,9 +26,17 @@ menu "Kontrol pompa"
 
     config PUMP_OFF_TEMP
         int "Suhu pompa OFF (C)"
-        default 29
+        default 27
         help
-            Pompa OFF saat suhu < nilai ini. Sama dengan suhu ON sesuai brief.
-            Isi lebih kecil (misal 30) untuk histeresis.
+            Pompa OFF saat suhu < nilai ini. Default 27 C (histeresis 2 C)
+            supaya pompa tidak mati/nyala sendiri akibat fluktuasi 1 C DHT11.
+
+    config PUMP_MIN_HOLD_S
+        int "Durasi tahan minimum status pompa (detik)"
+        range 0 300
+        default 15
+        help
+            Jeda minimum sebelum mode auto boleh membalik status pompa.
+            Isi 0 untuk menonaktifkan.
 
 endmenu

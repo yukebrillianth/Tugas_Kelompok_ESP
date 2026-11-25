@@ -5,24 +5,29 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* Suhu (int8) lalu kelembapan. DHT11 hanya memberi bilangan bulat. */
-#define SENSOR_PAYLOAD_LEN 2
+/* Suhu (int8), kelembapan (uint8), lalu sequence number (uint8) untuk deduplikasi anti-burst.
+ * Decoder tetap menerima paket 2-byte lama agar kompatibel mundur. */
+#define SENSOR_PAYLOAD_LEN_V1 2
+#define SENSOR_PAYLOAD_LEN    3
 
 typedef struct {
     int8_t temp_c;
     uint8_t hum_pct;
+    uint8_t seq;
+    bool has_seq;
 } sensor_reading_t;
 
 static inline void sensor_encode(const sensor_reading_t *r, uint8_t out[SENSOR_PAYLOAD_LEN])
 {
     out[0] = (uint8_t)r->temp_c;
     out[1] = r->hum_pct;
+    out[2] = r->seq;
 }
 
 /* Input dari mesh, jadi panjang dan rentang divalidasi. */
 static inline bool sensor_decode(const uint8_t *in, size_t len, sensor_reading_t *r)
 {
-    if (in == NULL || r == NULL || len != SENSOR_PAYLOAD_LEN) {
+    if (in == NULL || r == NULL || (len != SENSOR_PAYLOAD_LEN && len != SENSOR_PAYLOAD_LEN_V1)) {
         return false;
     }
     int8_t t = (int8_t)in[0];
@@ -31,5 +36,12 @@ static inline bool sensor_decode(const uint8_t *in, size_t len, sensor_reading_t
     }
     r->temp_c = t;
     r->hum_pct = in[1];
+    if (len == SENSOR_PAYLOAD_LEN) {
+        r->seq = in[2];
+        r->has_seq = true;
+    } else {
+        r->seq = 0;
+        r->has_seq = false;
+    }
     return true;
 }
